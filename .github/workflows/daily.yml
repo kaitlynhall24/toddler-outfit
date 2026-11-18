@@ -1,0 +1,34 @@
+name: Daily outfit
+on:
+  schedule:
+    - cron: "15 10 * * *"   # 6:15am EDT (used Mar–Nov)
+    - cron: "15 11 * * *"   # 6:15am EST (used Nov–Mar)
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: outfit }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: { name: github-pages }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip the run that doesn't match today's daylight-saving offset
+        id: gate
+        run: |
+          off=$(TZ=America/New_York date +%z)
+          if [ "${{ github.event_name }}" = workflow_dispatch ] || \
+             { [ "$off" = "-0400" ] && [ "${{ github.event.schedule }}" = "15 10 * * *" ]; } || \
+             { [ "$off" = "-0500" ] && [ "${{ github.event.schedule }}" = "15 11 * * *" ]; }; then
+            echo go=1 >> $GITHUB_OUTPUT; fi
+      - if: steps.gate.outputs.go
+        run: python3 outfit.py ${{ github.event_name == 'workflow_dispatch' && '--force' || '' }}
+      - if: steps.gate.outputs.go && hashFiles('push.json') != ''
+        uses: actions/upload-pages-artifact@v3
+        with: { path: site }
+      - if: steps.gate.outputs.go && hashFiles('push.json') != ''
+        uses: actions/deploy-pages@v4
+      - if: steps.gate.outputs.go && hashFiles('push.json') != ''
+        run: python3 outfit.py --send
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          PAGE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
